@@ -40,7 +40,7 @@ model = resnet12().to(device)
 
 # Define loss function and optimizer
 criterion = nn.CrossEntropyLoss()
-optimizer = optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
+optimizer = optim.SGD(model.parameters(), llr =0.01,momentum=0.9,nesterov=True, weight_decay=0.0005)
 lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[60, 70], gamma=0.05)
 
 # Train the model
