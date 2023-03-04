@@ -31,8 +31,8 @@ val_transform = transforms.Compose([
 train_data = ImageFolder('./cropped/train', transform=train_transform)
 val_data = ImageFolder('./cropped/test', transform=val_transform)
 
-train_loader = DataLoader(train_data, batch_size=32, shuffle=True, num_workers=0)
-val_loader = DataLoader(val_data, batch_size=32, shuffle=False, num_workers=0)
+train_loader = DataLoader(train_data, batch_size=32, shuffle=True, num_workers=2)
+val_loader = DataLoader(val_data, batch_size=32, shuffle=False, num_workers=2)
 
 # Load pre-trained ResNet-18 model
 model = resnet12().to(device)
