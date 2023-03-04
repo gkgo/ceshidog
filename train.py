@@ -41,9 +41,10 @@ model = resnet12().to(device)
 # Define loss function and optimizer
 criterion = nn.CrossEntropyLoss()
 optimizer = optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
+lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[60, 70], gamma=0.05)
 
 # Train the model
-num_epochs = 10
+num_epochs = 80
 best_acc = 0.0
 for epoch in range(num_epochs):
     train_loss = 0.0
@@ -85,7 +86,8 @@ for epoch in range(num_epochs):
                 val_total += labels.size(0)
                 val_correct += (predicted == labels).sum().item()
                 tepoch.set_postfix(loss=val_loss/val_total, acc=val_correct/val_total)
-
+                
+    lr_scheduler.step()
     end_time = time.time()
     print(f"Epoch {epoch+1}/{num_epochs} took {end_time - start_time:.2f} seconds")
     print(f"Train loss: {train_loss/train_total:.4f}, Train accuracy: {train_correct/train_total:.4f}")
