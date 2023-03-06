@@ -10,7 +10,7 @@ def featureL2Norm(feature):
 class mySelfCorrelationComputation(nn.Module):
     def __init__(self, kernel_size=(5, 5), padding=2):
         super(mySelfCorrelationComputation, self).__init__()
-        planes =[640, 64, 64, 640]
+        planes =[512, 64, 64, 640]
         self.kernel_size = kernel_size
         self.unfold = nn.Unfold(kernel_size=kernel_size, padding=padding)
         self.relu = nn.ReLU(inplace=False)
@@ -18,13 +18,13 @@ class mySelfCorrelationComputation(nn.Module):
         self.conv1x1_in = nn.Sequential(nn.Conv2d(planes[0], planes[1], kernel_size=1, bias=False, padding=0),
                                         nn.BatchNorm2d(planes[1]),
                                         nn.ReLU(inplace=True))
-        self.embeddingFea = nn.Sequential(nn.Conv2d(1664, 640,
+        self.embeddingFea = nn.Sequential(nn.Conv2d(1664, 512,
                                                      kernel_size=1, bias=False, padding=0),
-                                           nn.BatchNorm2d(640),
+                                           nn.BatchNorm2d(512),
                                            nn.ReLU(inplace=True))
         self.conv1x1_out = nn.Sequential(
-            nn.Conv2d(640, 640, kernel_size=1, bias=False, padding=0),
-            nn.BatchNorm2d(640))
+            nn.Conv2d(512, 512, kernel_size=1, bias=False, padding=0),
+            nn.BatchNorm2d(512))
 
     def forward(self, x):
 
@@ -139,36 +139,64 @@ class cbam_block(nn.Module):
 
 
 def conv3x3(in_planes, out_planes, stride=1):
-    """3x3 convolution with padding"""
-    return nn.Conv2d(in_planes, out_planes, kernel_size=3, stride=stride,
-                     padding=1, bias=False)
+    return nn.Conv2d(in_planes, out_planes, kernel_size=3, stride=stride, padding=1, bias=False)
 
-def gaussian_normalize( x, dim, eps=1e-05):
-    x_mean = torch.mean(x, dim=dim, keepdim=True)
-    x_var = torch.var(x, dim=dim, keepdim=True)  # 求dim上的方差
-    x = torch.div(x - x_mean, torch.sqrt(x_var + eps))  # （x原始-x平均）/根号下x_var
-    return x
+def conv1x1(in_planes, out_planes, stride=1):
+    return nn.Conv2d(in_planes, out_planes, kernel_size=1, stride=stride, bias=False)
 
+def normalize_feature(x):
+    return x - x.mean(1).unsqueeze(1)  # x-x.mean(1)行求平均值并在channal维上增加一个维度
 
 
 class BasicBlock(nn.Module):
     expansion = 1
 
-    def __init__(self, inplanes, planes, stride=1, downsample=None):
+    def __init__(self, inplanes, planes, stride=1, downsample=None, *args, **kwargs):
         super(BasicBlock, self).__init__()
-        self.conv1 = conv3x3(inplanes, planes)
+        self.conv1 = conv3x3(inplanes, planes, stride)
         self.bn1 = nn.BatchNorm2d(planes)
-        self.relu = nn.LeakyReLU(0.1)
+        self.relu = nn.ReLU(inplace=True)
         self.conv2 = conv3x3(planes, planes)
         self.bn2 = nn.BatchNorm2d(planes)
-        self.conv3 = conv3x3(planes, planes)
-        self.bn3 = nn.BatchNorm2d(planes)
-        self.maxpool = nn.MaxPool2d(stride)
+        if inplanes != planes:
+            self.downsample = nn.Sequential(conv1x1(inplanes, planes, stride), nn.BatchNorm2d(planes))
+        else:
+            self.downsample = lambda x: x
+        self.stride = stride
+
+    def forward(self, x):
+        residual = self.downsample(x)
+
+        out = self.conv1(x)
+        out = self.bn1(out)
+        out = self.relu(out)
+
+        out = self.conv2(out)
+        out = self.bn2(out)
+
+        out += residual
+        out = self.relu(out)
+
+        return out
+
+
+class Bottleneck(nn.Module):
+    expansion = 4
+
+    def __init__(self, inplanes, planes, stride=1, downsample=None):
+        super(Bottleneck, self).__init__()
+        self.conv1 = conv1x1(inplanes, planes)
+        self.bn1 = nn.BatchNorm2d(planes)
+        self.conv2 = conv3x3(planes, planes, stride)
+        self.bn2 = nn.BatchNorm2d(planes)
+        self.conv3 = conv1x1(planes, planes * self.expansion)
+        self.bn3 = nn.BatchNorm2d(planes * self.expansion)
+        self.relu = nn.ReLU(inplace=True)
         self.downsample = downsample
         self.stride = stride
 
     def forward(self, x):
-        residual = x
+        identity = x
 
         out = self.conv1(x)
         out = self.bn1(out)
@@ -182,153 +210,88 @@ class BasicBlock(nn.Module):
         out = self.bn3(out)
 
         if self.downsample is not None:
-            residual = self.downsample(x)
-        out += residual
+            identity = self.downsample(x)
+
+        out += identity
         out = self.relu(out)
-        out = self.maxpool(out)
 
         return out
-def normalize_feature(x):
-    return x - x.mean(1).unsqueeze(1)  # x-x.mean(1)行求平均值并在channal维上增加一个维度
+
 
 class ResNet(nn.Module):
 
-    def __init__(self, block, num_classes=120, zero_init_residual=False):
-        self.inplanes = 3
+    def __init__(self, block, layers, num_classes=120, zero_init_residual=False):
         super(ResNet, self).__init__()
-
-        self.layer1 = self._make_layer(block, 64, stride=2)
-        self.layer2 = self._make_layer(block, 160, stride=2)
-        self.layer3 = self._make_layer(block, 320, stride=2)
-        self.layer4 = self._make_layer(block, 640, stride=2)
-        self.scr_module = mySelfCorrelationComputation(kernel_size=(5,5), padding=3)
-        # self.scr_module = SqueezeExcitation(channel=640)
+        self.inplanes = 64
+        self.conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3, bias=False)
+        self.bn1 = nn.BatchNorm2d(64)
+        self.relu = nn.ReLU(inplace=True)
+        self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+        self.layer1 = self._make_layer(block, 64, layers[0])
+        self.layer2 = self._make_layer(block, 128, layers[1], stride=2)
+        self.layer3 = self._make_layer(block, 256, layers[2], stride=2)
+        self.layer4 = self._make_layer(block, 512, layers[3], stride=2)
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
-        self.fc = nn.Linear(640, num_classes)
+        self.scr_module = mySelfCorrelationComputation(kernel_size=(5, 5), padding=2)
+        self.fc = nn.Linear(512, num_classes)
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
-                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='leaky_relu')
+                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
             elif isinstance(m, nn.BatchNorm2d):
                 nn.init.constant_(m.weight, 1)
                 nn.init.constant_(m.bias, 0)
 
-    def _make_layer(self, block, planes, stride=1):
-        downsample = None
-        if stride != 1 or self.inplanes != planes * block.expansion:
-            downsample = nn.Sequential(
-                nn.Conv2d(self.inplanes, planes * block.expansion,
-                          kernel_size=1, stride=1, bias=False),
-                nn.BatchNorm2d(planes * block.expansion),
-            )
+        if zero_init_residual:
+            for m in self.modules():
+                if isinstance(m, Bottleneck):
+                    nn.init.constant_(m.bn3.weight, 0)
+                elif isinstance(m, BasicBlock):
+                    nn.init.constant_(m.bn2.weight, 0)
+
+    def _make_layer(self, block, planes, blocks, stride=1):
+        downsample = stride != 1
 
         layers = []
         layers.append(block(self.inplanes, planes, stride, downsample))
         self.inplanes = planes * block.expansion
+        for _ in range(1, blocks):
+            layers.append(block(self.inplanes, planes, 1))
 
         return nn.Sequential(*layers)
 
     def forward(self, x):
+        x = self.conv1(x)
+        x = self.bn1(x)
+        x = self.relu(x)
+        x = self.maxpool(x)
+
         x = self.layer1(x)
-
         x = self.layer2(x)
-
         x = self.layer3(x)
-
         x = self.layer4(x)
-#____________________________________
-        # identity = x
-        #
-        # x = self.scr_module(x)
-        #
-        # x = x + identity
-        #
-        # x = F.relu(x, inplace=True)
-#___________________________________
-        # b, c, h, w = x.shape
-        # x = normalize_feature(x)
-        #
-        # y = F.normalize(x, p=2, dim=1, eps=1e-8)
-        #
-        # d_s = y.view(b, c, -1)
-        # d_s = gaussian_normalize(d_s, dim=2)
-        #
-        # d_s = F.softmax(d_s / 2, dim=2)
-        # d_s = d_s.view(b, c, h, w)
-        #
-        # x1 = d_s + x
-        #
-        # x = x1.mean(dim=[-1, -2])
-        # x = self.fc(x)
-        # __________________________________________
+
         x = self.avgpool(x)
         x = x.view(x.size(0), -1)
         x = self.fc(x)
 
-        return x
-
-def resnet12():
-    return ResNet(BasicBlock)
-    
-    
-    
-
-
-
-def conv_block(in_channels, out_channels):
-    return nn.Sequential(
-        nn.Conv2d(in_channels, out_channels, 3, padding=1),
-        nn.BatchNorm2d(out_channels),
-        nn.ReLU(),
-        nn.MaxPool2d(2)
-    )
-
-class ConvNet4(nn.Module):
-
-    def __init__(self, num_classes, x_dim=3, hid_dim=64, z_dim=640):
-        super().__init__()
-        self.encoder = nn.Sequential(
-            conv_block(x_dim, hid_dim),
-            conv_block(hid_dim, hid_dim),
-            conv_block(hid_dim, hid_dim),
-            conv_block(hid_dim, z_dim),
-        )
-        self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
-        self.fc = nn.Linear(640, num_classes)
-        self.scr_module = mySelfCorrelationComputation(kernel_size=(1, 1), padding=0)
-        # self.scr_module = cbam_block(channel=640)
-        # self.scr_module = SqueezeExcitation(channel=640)
-
-    def forward(self, x):
-        x = self.encoder(x)
-
         identity = x
-
         x = self.scr_module(x)
 
 
-        x = x + identity
+#         x = x + identity
+#         x = F.relu(x, inplace=True)
 
-        x = F.relu(x, inplace=True)
-#_________________________________________________
-        b, c, h, w = x.shape
-        x = normalize_feature(x)
+#         x = normalize_feature(x)
 
-        y = F.normalize(x, p=2, dim=1, eps=1e-8)
-
-        d_s = y.view(b, c, -1)
-        d_s = gaussian_normalize(d_s, dim=2)
-
-        d_s = F.softmax(d_s /2, dim=2)
-        d_s = d_s.view(b,c,h, w)
-
-        x1 = d_s + x
-
-        x = x1.mean(dim=[-1, -2])
-        x = self.fc(x)
-#__________________________________________
-        # x = self.avgpool(x)
-        # x = x.view(x.size(0), -1)
-        # x = self.fc(x)
+#         x = x.mean(dim=[-1, -2])
+#         x = self.fc(x)
 
         return x
+
+
+def resnet18gai():
+    return ResNet(BasicBlock, [2, 2, 2, 2])
+
+def resnet34():
+    return ResNet(BasicBlock, [3, 4, 6, 3])
