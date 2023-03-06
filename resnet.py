@@ -275,8 +275,8 @@ class ResNet(nn.Module):
         x = x.view(x.size(0), -1)
         x = self.fc(x)
 
-        identity = x
-        x = self.scr_module(x)
+#         identity = x
+#         x = self.scr_module(x)
 
 
 #         x = x + identity
