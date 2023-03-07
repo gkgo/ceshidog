@@ -42,7 +42,7 @@ optimizer = optim.SGD(model.parameters(), lr =0.001,momentum=0.9,nesterov=True, 
 lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[100, 110], gamma=0.05)
 
 # Train the model
-num_epochs = 120
+num_epochs = 100
 best_acc = 0.0
 for epoch in range(num_epochs):
     train_loss = 0.0
