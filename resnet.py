@@ -272,12 +272,12 @@ class ResNet(nn.Module):
         x = self.layer4(x)
 
 
-        identity = x
-        x = self.scr_module(x)
+#         identity = x
+#         x = self.scr_module(x)
 
 
-        x = x + identity
-        x = F.relu(x, inplace=True)
+#         x = x + identity
+#         x = F.relu(x, inplace=True)
 
         x = self.avgpool(x)
         x = x.view(x.size(0), -1)
