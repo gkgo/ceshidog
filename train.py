@@ -7,7 +7,7 @@ from torch.utils.data import DataLoader
 from torchvision.datasets import ImageFolder
 import time
 from tqdm import tqdm
-from resnet import resnet18gai
+from conv import ConvNet4
 
 # Set device to GPU if available
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -34,7 +34,7 @@ train_loader = DataLoader(train_data, batch_size=32, shuffle=True, num_workers=2
 val_loader = DataLoader(val_data, batch_size=32, shuffle=False, num_workers=2)
 
 # Load pre-trained ResNet-18 model
-model = resnet18gai().to(device)
+model = ConvNet4(num_classes=120).to(device)
 
 # Define loss function and optimizer
 criterion = nn.CrossEntropyLoss()
