@@ -85,14 +85,14 @@ def main():
 
     # Load data
 
-    train_data = ImageFolder('cub/train', transform=train_transform)
-    val_data = ImageFolder('cub/test', transform=val_transform)
+    train_data = ImageFolder('./cropped/train', transform=train_transform)
+    val_data = ImageFolder('./cropped/test', transform=val_transform)
 
     train_loader = DataLoader(train_data, batch_size=4, shuffle=True, num_workers=0, drop_last=True)
     val_loader = DataLoader(val_data, batch_size=4, shuffle=False, num_workers=0, drop_last=True)
 
     # model = resnet18gai().to(device)
-    model = resnet50(num_classes=200).to(device)
+    model = resnet50(num_classes=120).to(device)
 
 
     optimizer = optim.SGD(model.parameters(), lr=0.001, momentum=0.9, nesterov=True, weight_decay=0.0005)
